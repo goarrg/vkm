@@ -1,0 +1,38 @@
+CompileFlags:
+  Add: [
+    -Werror=vla, -Wall, -Wextra, -Wpedantic, -Wno-missing-field-initializers
+  ]
+Diagnostics:
+  UnusedIncludes: Strict
+---
+If:
+  PathMatch: [.*\.h, .*\.hpp]
+CompileFlags:
+  Add: [-Wno-unused-function, -Wno-unneeded-internal-declaration]
+---
+If:
+  PathMatch: [.*\.h]
+CompileFlags:
+  Add: [-xc-header]
+---
+If:
+  PathMatch: [.*\.hpp]
+CompileFlags:
+  Add: [-xc++-header]
+---
+If:
+  PathMatch: [.*\.c, .*\.h]
+CompileFlags:
+  Remove: -std=*
+  Add: [-std=c17]
+---
+If:
+  PathMatch: [.*\.cpp, .*\.hpp]
+CompileFlags:
+  Remove: -std=*
+  Add: [-std=c++23]
+---
+If:
+  PathMatch: [.*\.inc]
+Diagnostics:
+  Suppress: '*'

@@ -1,0 +1,49 @@
+HeaderFilterRegex: '.*[\/|\\]vkm[\/|\\].*\.(hpp|inc)'
+FormatStyle:       'file'
+Checks: [
+      bugprone*,
+      clang-analyzer*,
+      misc*,
+      modernize*,
+      performance*,
+      readability*,
+      portability-restrict-system-includes,
+
+      -bugprone-easily-swappable-parameters,
+      -bugprone-invalid-enum-default-initialization,
+      -clang-analyzer-optin*,
+      -clang-diagnostic-format-security,
+      -misc-non-private-member-variables-in-classes,
+      -misc-use-anonymous-namespace,
+      -modernize-concat-nested-namespaces,
+      -modernize-deprecated-headers,
+      -modernize-macro-to-enum,
+      -modernize-use-designated-initializers,
+      -modernize-use-trailing-return-type,
+      -readability-avoid-unconditional-preprocessor-if,
+      -readability-function-cognitive-complexity,
+      -readability-identifier-length,
+      -readability-isolate-declaration,
+      -readability-magic-numbers,
+      -readability-named-parameter,
+      -readability-uppercase-literal-suffix,
+      -readability-use-anyofallof
+]
+
+CheckOptions:
+      portability-restrict-system-includes.Includes: -*, *.h, -windows.h, new, type_traits, concepts, algorithm
+      readability-function-cognitive-complexity.IgnoreMacros: true
+      readability-identifier-naming.AggressiveDependentMemberLookup: true
+
+      readability-identifier-naming.EnumConstantCase: camelBack
+      readability-identifier-naming.ClassCase: camelBack
+      readability-identifier-naming.FunctionCase: camelBack
+      readability-identifier-naming.MacroDefinitionCase: UPPER_CASE
+      readability-identifier-naming.MemberCase: camelBack
+      readability-identifier-naming.NamespaceCase: camelBack
+      readability-identifier-naming.ParameterCase: camelBack
+      readability-identifier-naming.TemplateParameterCase: CamelCase
+      readability-identifier-naming.TypeAliasCase: camelBack
+      readability-identifier-naming.VariableCase: camelBack
+
+      readability-qualified-auto.AddConstToQualified: true

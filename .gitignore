@@ -1,0 +1,11 @@
+*.exe
+*.test
+*~
+.goarrg
+.vscode
+core
+out.*
+compile_flags.txt
+compile_commands.json
+.cache
+include/vkm/inc

@@ -1,0 +1,6 @@
+Checks: [
+      portability-restrict-system-includes
+]
+
+CheckOptions:
+      portability-restrict-system-includes.Includes: -*, *.h, -windows.h, new, type_traits, concepts, algorithm, stdexcept

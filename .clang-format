@@ -1,0 +1,29 @@
+---
+BasedOnStyle: Chromium
+IndentWidth: 4
+TabWidth: 4
+UseTab: Always
+ColumnLimit: 120
+QualifierAlignment: Custom
+QualifierOrder: ['inline', 'static', 'constexpr', 'const', 'friend', 'type']
+
+AlignOperands: Align
+AllowAllParametersOfDeclarationOnNextLine: true
+BreakBeforeBinaryOperators: All
+BinPackArguments: true
+BinPackParameters: true
+IndentPPDirectives: None
+PenaltyBreakAssignment: 21
+PenaltyBreakBeforeFirstCallParameter: 1
+PenaltyExcessCharacter: 1
+PenaltyIndentedWhitespace: 1
+SortIncludes: false
+
+CommentPragmas: '^go:'
+ReflowComments:  true
+AlignTrailingComments:
+  Kind: Always
+SpacesInLineCommentPrefix:
+  Minimum:         1
+  Maximum:        -1
+---

@@ -1,0 +1,59 @@
+{
+    "linters": {
+        "enable": [
+            "copyloopvar",
+            "depguard",
+            "dupl",
+            "exhaustive",
+            "gofumpt",
+            "goimports",
+            "govet",
+            "misspell",
+            "unconvert",
+            "wastedassign",
+            "whitespace"
+        ],
+        "disable": [
+            "gosec",
+            "musttag"
+        ],
+        "presets": [
+            "bugs"
+        ]
+    },
+    "linters-settings": {
+        "govet": {
+            "enable-all": true,
+            "disable": [
+                "composites",
+                "fieldalignment",
+                "shadow"
+            ]
+        },
+        "misspell": {
+            "locale": "US",
+            "ignore-words": [
+                "goarrg",
+                "vulkan"
+            ]
+        },
+        "depguard": {
+            "rules": {
+                "main": {
+                    "allow": [
+                        "$gostd",
+                        "golang.org",
+                        "goarrg.com"
+                    ]
+                }
+            }
+        }
+    },
+    "issues": {
+        "exclude": [
+            ".*string `windows` has \\d+ occurrences, make it a constant",
+            ".*string `linux` has \\d+ occurrences, make it a constant",
+            ".*string `darwin` has \\d+ occurrences, make it a constant"
+        ]
+    }
+}
