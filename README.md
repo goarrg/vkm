@@ -37,3 +37,13 @@ vkm is in a request for comments mode while we figure out the tooling and other 
 - No MSVC support (yet), if you have ideas, file a issue
 - Does not handle OS specific or provisional feature structs (we do not know how to support this)
 - Could use more docs
+
+## Install
+- Create a new folder and cd to it
+- Run `go mod init example.com`
+  - This initializes the folder as a go project, example.com is a url that can be used to fetch your project
+- Run `go get goarrg.com/lib/vkm/cmd/make`
+  - This downloads vkm and configures your project to depend on it
+- Run `go run goarrg.com/lib/vkm/cmd/make`
+  - This actually builds vkm, the results will be in `.goarrg/cgodep/vkm/*`
+  - We have a pkg-config replacement at `.goarrg/tool/cgodep-config` this is able to query goarrg built libs with a fallback to the system's pkg-config for external libs
