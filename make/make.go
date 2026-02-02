@@ -92,6 +92,7 @@ func Install(c Config) string {
 	toolchain.EnvRegister("CGO_CFLAGS", flags)
 	toolchain.EnvRegister("CGO_CXXFLAGS", flags)
 	toolchain.EnvRegister("CGO_LDFLAGS", ldflags)
+	installGeneratorDeps()
 	if err := installVKM(c); err != nil {
 		panic(debug.ErrorWrapf(err, "Failed to install vkm"))
 	}
