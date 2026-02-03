@@ -19,6 +19,7 @@ vkm is in a request for comments mode while we figure out the tooling and other 
   - If the struct is associated with multiple extensions you are required to manually pass which one do you wish to use, as we have no way of knowing your requirements
 - No differentiation of instance/device extension when creating both through vkm
 - Built in function pointer loader with a list trimmed to the lowest vulkan version vkm works with (eventually this may be selectable)
+  - Extension functions promoted to core are not included in the function table
 
 ### Managed objects
 - vkInstance creation/destruction
@@ -26,7 +27,7 @@ vkm is in a request for comments mode while we figure out the tooling and other 
 - Multiple vkQueues creation
   - We do not have API for managed inter queue sync yet but you can provide your own semaphores
 - Swapchain management
-  - You are still required to signal acquire/present/resize but it is much nice to work with
+  - You are still required to signal acquire/present/resize but it is much nicer to work with
 
 ## Requirements
 - go 1.24 toolchain as the build system uses go
