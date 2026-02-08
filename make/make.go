@@ -348,7 +348,7 @@ func installVKM(c Config) error {
 	}
 
 	{
-		fConfig, err := os.OpenFile(filepath.Join(includeDir, "vkm", "vkm_config.h"), os.O_APPEND, 0o655)
+		fConfig, err := os.OpenFile(filepath.Join(includeDir, "vkm", "vkm_config.h"), os.O_WRONLY|os.O_APPEND, 0o655)
 		if err != nil {
 			panic(err)
 		}
