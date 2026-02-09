@@ -261,8 +261,8 @@ inline static void appendVkStructureChain(vkm::std::vector<vkm::std::smartPtr<vk
 	if (ptr == nullptr) {
 		return;
 	}
-	if (alloc) {
-		for (; ptr != nullptr; ptr = ptr->pNext) {
+	auto clone = [&]() {
+		if (alloc) {
 			const size_t sz = vkm::vk::reflect::sizeOf(ptr->sType);
 			if (sz == 0) {
 				vkm::std::stringbuilder builder;
@@ -275,13 +275,22 @@ inline static void appendVkStructureChain(vkm::std::vector<vkm::std::smartPtr<vk
 			}
 			memcpy(tmp, ptr, sz);
 			chain.pushBack({static_cast<vkStructureChain*>(tmp), [](vkStructureChain* ptr) { free(ptr); }});
-			chain.last()->pNext = nullptr;
-			chain[chain.size() - 2]->pNext = chain.last().get();
+		} else {
+			// we need every pointer inside of chain so append works more than once
+			chain.pushBack({ptr, [](vkStructureChain*) {}});
 		}
-	} else if (chain.size() > 0) {
-		chain.last()->pNext = ptr;
-	} else {
-		chain.pushBack({ptr, [](vkStructureChain*) {}});
+		chain.last()->pNext = nullptr;
+	};
+
+	// chain needs to be of size 2+ for the pnext logic to work
+	if (chain.size() == 0) {
+		clone();
+		ptr = ptr->pNext;
+	}
+
+	for (; ptr != nullptr; ptr = ptr->pNext) {
+		clone();
+		chain[chain.size() - 2]->pNext = chain.last().get();
 	}
 }
 
