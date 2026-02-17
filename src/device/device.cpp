@@ -86,10 +86,10 @@ void generateUUID(VkPhysicalDeviceProperties properties, VKM_UUID_INDEX_TYPE ind
 	// invalid value we use that as we are not following any known variant
 	static constexpr vkm_device_uuid uuidBaseBits = {0, 0, 0, 0, 0, 0, 0x80, 0, 0xF0};
 	memcpy(uuid, uuidBaseBits, VK_UUID_SIZE);
-	memcpy(uuid + VKM_UUID_VID_OFFSET, &properties.vendorID, sizeof(properties.vendorID));
+	memcpy(&((*uuid)[VKM_UUID_VID_OFFSET]), &properties.vendorID, sizeof(properties.vendorID));
 	// deviceID is not unique enough on multi-gpu systems, throw in the index inot the uuid too
-	memcpy(uuid + VKM_UUID_INDEX_OFFSET, &index, sizeof(VKM_UUID_INDEX_TYPE));
-	memcpy(uuid + VKM_UUID_DID_OFFSET, &properties.deviceID, sizeof(properties.deviceID));
+	memcpy(&((*uuid)[VKM_UUID_INDEX_OFFSET]), &index, sizeof(VKM_UUID_INDEX_TYPE));
+	memcpy(&((*uuid)[VKM_UUID_DID_OFFSET]), &properties.deviceID, sizeof(properties.deviceID));
 }
 }  // namespace vkm::vk::device
 
