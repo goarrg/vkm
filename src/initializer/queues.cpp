@@ -39,7 +39,7 @@ limitations under the License.
 			ok = true;
 		}
 		if (!ok) {
-			vkm::ePrintf("Device selector has no queues required");
+			vkm::ePrintf("Initializer has no queues required");
 			return false;
 		}
 	}

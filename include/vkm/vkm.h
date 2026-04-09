@@ -62,11 +62,11 @@ typedef struct {
 	vkm_loggerFn loggerFn;
 	// must not be null, instance creation depends on it
 	PFN_vkGetInstanceProcAddr procAddr;
-	// if null, indicates instance will be created later through vkm_deviceSelector,
+	// if null, indicates instance will be created later through vkm_initializer,
 	// will return VK_INCOMPLETE
 	VkInstance vkInstance;
 	// if true, destroys vkInstance at vkm_shutdown
-	// this is always true for instances created from selectors
+	// this is always true for instances created from initializers
 	VkBool32 gainOwnership;
 } vkm_initInfo;
 
