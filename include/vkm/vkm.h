@@ -325,7 +325,7 @@ typedef struct {
 
 		uint32_t numSignalSemaphores;
 		VkSemaphoreSubmitInfo* pSignalSemaphores;
-	} submitInfo;
+	} queueSubmitInfo;
 	uint32_t numPrsentInfos;
 	vkm_swapchain_presentInfo* pPresentInfos;
 } vkm_context_commandBufferEndInfo;

@@ -354,17 +354,17 @@ VKM_FN void vkm_context_endCommandBuffer(vkm_context ctxHandle, vkm_context_comm
 		};
 		VkSubmitInfo2 submitInfo = {
 			.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-			.pNext = info.submitInfo.pNext,
-			.flags = info.submitInfo.flags,
+			.pNext = info.queueSubmitInfo.pNext,
+			.flags = info.queueSubmitInfo.flags,
 
-			.waitSemaphoreInfoCount = info.submitInfo.numWaitSemaphores,
-			.pWaitSemaphoreInfos = info.submitInfo.pWaitSemaphores,
+			.waitSemaphoreInfoCount = info.queueSubmitInfo.numWaitSemaphores,
+			.pWaitSemaphoreInfos = info.queueSubmitInfo.pWaitSemaphores,
 
 			.commandBufferInfoCount = commandbuffers.size(),
 			.pCommandBufferInfos = commandbuffers.get(),
 		};
 		if (frame.pendingWaitSemaphores.size() > 0) {
-			frame.pendingWaitSemaphores.pushBack(info.submitInfo.numWaitSemaphores, info.submitInfo.pWaitSemaphores);
+			frame.pendingWaitSemaphores.pushBack(info.queueSubmitInfo.numWaitSemaphores, info.queueSubmitInfo.pWaitSemaphores);
 			submitInfo.waitSemaphoreInfoCount = frame.pendingWaitSemaphores.size();
 			submitInfo.pWaitSemaphoreInfos = frame.pendingWaitSemaphores.get();
 		}
@@ -392,7 +392,7 @@ VKM_FN void vkm_context_endCommandBuffer(vkm_context ctxHandle, vkm_context_comm
 				.value = ++ctx->semaphore.pendingValue,
 				.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
 			});
-			frame.pendingSignalSemaphores.pushBack(info.submitInfo.numSignalSemaphores, info.submitInfo.pSignalSemaphores);
+			frame.pendingSignalSemaphores.pushBack(info.queueSubmitInfo.numSignalSemaphores, info.queueSubmitInfo.pSignalSemaphores);
 			submitInfo.signalSemaphoreInfoCount = frame.pendingSignalSemaphores.size();
 			submitInfo.pSignalSemaphoreInfos = frame.pendingSignalSemaphores.get();
 		}
