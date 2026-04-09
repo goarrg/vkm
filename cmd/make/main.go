@@ -22,6 +22,7 @@ import (
 	"runtime"
 
 	vkm "goarrg.com/lib/vkm/make"
+	goarrg "goarrg.com/make"
 	"goarrg.com/toolchain"
 	"goarrg.com/toolchain/cc"
 	"goarrg.com/toolchain/cgodep"
@@ -48,6 +49,16 @@ func main() {
 }
 
 func gen(args []string) {
+	goarrg.Install(
+		goarrg.Config{
+			Dependencies: goarrg.Dependencies{
+				Vulkan: goarrg.VulkanDependencies{
+					InstallHeaders: true,
+					InstallDocs:    true,
+				},
+			},
+		},
+	)
 	vkm.Gen()
 }
 
@@ -78,29 +89,21 @@ func install(args []string) {
 		}
 	}
 
-	flags := "-Wno-dll-attribute-on-redeclaration "
-	ldflags := ""
-	switch build {
-	case toolchain.BuildRelease:
-		flags += "-O2 -march=x86-64-v3 -DNDEBUG"
-		ldflags += "-O2"
-	case toolchain.BuildDevelopment:
-		flags += "-glldb -O2 -march=x86-64-v3"
-		ldflags += "-glldb -O2"
-	case toolchain.BuildDebug:
-		flags += "-glldb -O0 -march=x86-64-v3"
-		ldflags += "-glldb -O0"
-	}
-
-	os.Setenv("GOAMD64", "v3")
-	os.Setenv("CGO_CFLAGS", flags)
-	os.Setenv("CGO_CXXFLAGS", flags)
-	os.Setenv("CGO_LDFLAGS", ldflags)
-
 	golang.Setup(golang.Config{Target: target})
 	cgodep.Install()
-	cc.Setup(cc.Config{Compiler: cc.CompilerClang, Target: target})
+	cc.Setup(cc.Config{Compiler: cc.CompilerClang, Target: target}, build)
 
+	goarrg.Install(
+		goarrg.Config{
+			Target: target,
+			Dependencies: goarrg.Dependencies{
+				Vulkan: goarrg.VulkanDependencies{
+					InstallHeaders: true,
+					InstallDocs:    true,
+				},
+			},
+		},
+	)
 	vkm.Install(vkm.Config{
 		Target: target,
 		BuildOptions: vkm.BuildOptions{

@@ -2,7 +2,7 @@ module goarrg.com/lib/vkm
 
 go 1.24.0
 
-require goarrg.com v0.0.0-20260202221139-a101abc85b03
+require goarrg.com v0.0.0-20260409212226-b036a1665e0f
 
 require (
 	golang.org/x/exp v0.0.0-20251125195548-87e1e737ad39 // indirect
