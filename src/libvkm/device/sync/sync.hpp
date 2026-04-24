@@ -20,8 +20,6 @@ limitations under the License.
 #error C++ only header
 #endif
 
-#include <stdio.h>
-
 #include "vkm/std/vector.hpp"
 
 #include "vkm.hpp"

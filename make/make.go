@@ -66,7 +66,7 @@ func Install(c Config) {
 func installVKM(c Config) error {
 	vkapi := uint64(C.VKM_VK_MIN_API)
 	module := golang.CallersModule()
-	srcDir := module.Dir
+	srcDir := filepath.Join(module.Dir, "src", "libvkm")
 
 	var version, buildID string
 	{
@@ -106,6 +106,7 @@ func installVKM(c Config) error {
 			StaticLDFlags: []string{"-L" + filepath.Join(installDir, "lib"), "-lvkm-static"},
 		},
 	}
+	m.SetDependencies(c.Target, deps...)
 	if c.ForceStatic {
 		m.Flags.LDFlags = m.Flags.StaticLDFlags
 	}
@@ -142,7 +143,7 @@ func installVKM(c Config) error {
 
 		{
 			genNonShipables(srcDir, filepath.Join(includeDir, "vkm", "inc"), vkspec.Parse(), vkapi)
-			err := filepath.WalkDir(filepath.Join(srcDir, "include"), func(path string, d os.DirEntry, err error) error {
+			err := filepath.WalkDir(filepath.Join(module.Dir, "include"), func(path string, d os.DirEntry, err error) error {
 				if err != nil {
 					return err
 				}
@@ -152,7 +153,7 @@ func installVKM(c Config) error {
 					}
 					return nil
 				}
-				newPath := filepath.Join(includeDir, strings.TrimPrefix(path, filepath.Join(srcDir, "include")))
+				newPath := filepath.Join(includeDir, strings.TrimPrefix(path, filepath.Join(module.Dir, "include")))
 				switch filepath.Ext(path) {
 				case ".h", ".hpp":
 				default:
@@ -185,8 +186,8 @@ func installVKM(c Config) error {
 				CXXFlags: []string{"-I" + includeDir},
 			},
 			CommandOnlyFlags: cc.BuildFlags{
-				CFlags:   []string{"-I" + filepath.Join(srcDir, "include"), "-Wall", "-Wextra", "-Wpedantic"},
-				CXXFlags: []string{"-I" + filepath.Join(srcDir, "include"), "-Wall", "-Wextra", "-Wpedantic"},
+				CFlags:   []string{"-I" + filepath.Join(module.Dir, "include"), "-Wall", "-Wextra", "-Wpedantic"},
+				CXXFlags: []string{"-I" + filepath.Join(module.Dir, "include"), "-Wall", "-Wextra", "-Wpedantic"},
 			},
 		}
 		{
@@ -199,7 +200,7 @@ func installVKM(c Config) error {
 				CXXFlags: append(cFlags, strings.Split(toolchain.EnvGet("CGO_CXXFLAGS"), " ")...),
 			}
 			{
-				extraFlags := []string{"-I" + filepath.Join(srcDir, "src"), "-Werror=vla", "-Wno-unknown-pragmas", "-Wno-missing-field-initializers", "-Wno-format-security"}
+				extraFlags := []string{"-I" + srcDir, "-Werror=vla", "-Wno-unknown-pragmas", "-Wno-missing-field-initializers", "-Wno-format-security"}
 				buildFlags.CFlags = append(buildFlags.CFlags, extraFlags...)
 				buildFlags.CXXFlags = append(buildFlags.CXXFlags, extraFlags...)
 			}

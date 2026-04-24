@@ -43,7 +43,7 @@ func Gen() {
 	vkapi := uint64(C.VKM_VK_MIN_API)
 
 	rootDir := golang.CallersModule().Dir
-	srcDir := filepath.Join(rootDir, "src")
+	srcDir := filepath.Join(rootDir, "src", "libvkm")
 	genFN(srcDir)
 
 	data := vkspec.Parse()
