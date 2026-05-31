@@ -35,7 +35,6 @@ import (
 	"time"
 
 	"goarrg.com/debug"
-	"goarrg.com/lib/vkm/vkspec"
 	"goarrg.com/toolchain"
 	"goarrg.com/toolchain/cc"
 	"goarrg.com/toolchain/cgodep"
@@ -55,16 +54,61 @@ type Config struct {
 	ForceStatic  bool
 	Target       toolchain.Target
 	BuildOptions BuildOptions
+	VkAPI        uint32
 }
 
 func Install(c Config) {
+	if c.VkAPI == 0 {
+		c.VkAPI = uint32(C.VKM_VK_MIN_API)
+	}
 	if err := installVKM(c); err != nil {
 		panic(debug.ErrorWrapf(err, "Failed to install vkm"))
 	}
 }
 
+func genBuildOptions(srcDir, cmdIncludeDir, installIncludeDir string, target toolchain.Target, deps ...string) (cc.BuildOptions, error) {
+	cFlags, err := cgodep.Resolve(target, cgodep.ResolveCFlags, deps...)
+	if err != nil {
+		return cc.BuildOptions{}, err
+	}
+	ldFlags, err := cgodep.Resolve(target, cgodep.ResolveLDFlags, deps...)
+	if err != nil {
+		return cc.BuildOptions{}, err
+	}
+
+	buildOptions := cc.BuildOptions{
+		Target: target,
+		BuildFlags: cc.BuildFlags{
+			CFlags:   append(cFlags, strings.Split(toolchain.EnvGet("CGO_CFLAGS"), " ")...),
+			CXXFlags: append(cFlags, strings.Split(toolchain.EnvGet("CGO_CXXFLAGS"), " ")...),
+		},
+		CompileOnlyFlags: cc.BuildFlags{
+			CFlags:   []string{"-I" + installIncludeDir},
+			CXXFlags: []string{"-I" + installIncludeDir},
+		},
+		CommandOnlyFlags: cc.BuildFlags{
+			CFlags:   []string{"-I" + cmdIncludeDir, "-Wall", "-Wextra", "-Wpedantic"},
+			CXXFlags: []string{"-I" + cmdIncludeDir, "-Wall", "-Wextra", "-Wpedantic"},
+		},
+		LDFlags: append(ldFlags, strings.Split(toolchain.EnvGet("CGO_LDFLAGS"), " ")...),
+	}
+
+	buildFlags := &buildOptions.BuildFlags
+	{
+		extraFlags := []string{"-I" + srcDir, "-Werror=vla", "-Wno-unknown-pragmas", "-Wno-missing-field-initializers", "-Wno-format-security"}
+		buildFlags.CFlags = append(buildFlags.CFlags, extraFlags...)
+		buildFlags.CXXFlags = append(buildFlags.CXXFlags, extraFlags...)
+	}
+	buildFlags.CFlags = append(buildFlags.CFlags,
+		"-std=c17",
+	)
+	buildFlags.CXXFlags = append(buildFlags.CXXFlags,
+		"-std=c++20",
+	)
+	return buildOptions, nil
+}
+
 func installVKM(c Config) error {
-	vkapi := uint64(C.VKM_VK_MIN_API)
 	module := golang.CallersModule()
 	srcDir := filepath.Join(module.Dir, "src", "libvkm")
 
@@ -142,7 +186,7 @@ func installVKM(c Config) error {
 		}
 
 		{
-			genNonShipables(srcDir, filepath.Join(includeDir, "vkm", "inc"), vkspec.Parse(), vkapi)
+			genNonShipables(srcDir, filepath.Join(includeDir, "vkm", "inc"), c.VkAPI)
 			err := filepath.WalkDir(filepath.Join(module.Dir, "include"), func(path string, d os.DirEntry, err error) error {
 				if err != nil {
 					return err
@@ -178,57 +222,44 @@ func installVKM(c Config) error {
 			}
 		}
 
-		buildOptions := cc.BuildOptions{
-			Type:   cc.BuildTypeStaticLibrary,
-			Target: c.Target,
-			CompileOnlyFlags: cc.BuildFlags{
-				CFlags:   []string{"-I" + includeDir},
-				CXXFlags: []string{"-I" + includeDir},
-			},
-			CommandOnlyFlags: cc.BuildFlags{
-				CFlags:   []string{"-I" + filepath.Join(module.Dir, "include"), "-Wall", "-Wextra", "-Wpedantic"},
-				CXXFlags: []string{"-I" + filepath.Join(module.Dir, "include"), "-Wall", "-Wextra", "-Wpedantic"},
-			},
+		buildOptions, err := genBuildOptions(srcDir, filepath.Join(module.Dir, "include"), includeDir, c.Target, deps...)
+		if err != nil {
+			return err
 		}
 		{
-			cFlags, err := cgodep.Resolve(c.Target, cgodep.ResolveCFlags, deps...)
-			if err != nil {
-				return err
-			}
-			buildFlags := cc.BuildFlags{
-				CFlags:   append(cFlags, strings.Split(toolchain.EnvGet("CGO_CFLAGS"), " ")...),
-				CXXFlags: append(cFlags, strings.Split(toolchain.EnvGet("CGO_CXXFLAGS"), " ")...),
-			}
-			{
-				extraFlags := []string{"-I" + srcDir, "-Werror=vla", "-Wno-unknown-pragmas", "-Wno-missing-field-initializers", "-Wno-format-security"}
-				buildFlags.CFlags = append(buildFlags.CFlags, extraFlags...)
-				buildFlags.CXXFlags = append(buildFlags.CXXFlags, extraFlags...)
-			}
-			buildFlags.CFlags = append(buildFlags.CFlags,
-				"-std=c17",
-			)
-			buildFlags.CXXFlags = append(buildFlags.CXXFlags,
-				"-std=c++20",
-			)
+			buildFlags := &buildOptions.BuildFlags
 			if c.BuildOptions.Enable.PIC && c.Target.OS == "linux" {
 				buildFlags.CFlags = append(buildFlags.CFlags, "-fPIC")
 				buildFlags.CXXFlags = append(buildFlags.CXXFlags, "-fPIC")
 			}
-			buildOptions.BuildFlags = buildFlags
-
-			ldFlags, err := cgodep.Resolve(c.Target, cgodep.ResolveLDFlags, deps...)
+		}
+		{ // headers cmds
+			buildOptions.Type = cc.BuildTypeCommandsOnly
+			srcDir := filepath.Join(module.Dir, "include")
+			jsonCmds, err := cc.BuildDir(srcDir, "", "", buildOptions)
 			if err != nil {
 				return err
 			}
-			buildOptions.LDFlags = append(ldFlags, strings.Split(toolchain.EnvGet("CGO_LDFLAGS"), " ")...)
+			{
+				jOut, err := json.Marshal(jsonCmds)
+				if err != nil {
+					return err
+				}
+				if err := os.WriteFile(filepath.Join(srcDir, "compile_commands.json"), jOut, 0o655); err != nil &&
+					!strings.Contains(srcDir, filepath.Join("pkg", "mod")) {
+					// do not warn if obtained through "go get" as the dir is read only
+					debug.WPrintf("Failed to write compile_commands.json: %v", err)
+				}
+			}
 		}
-		{
+		{ // libvkm
 			buildDir, err := os.MkdirTemp("", "vkm")
 			if err != nil {
 				return err
 			}
 			defer os.RemoveAll(buildDir)
 
+			buildOptions.Type = cc.BuildTypeStaticLibrary
 			jsonCmds, err := cc.BuildDir(srcDir, buildDir,
 				filepath.Join(installDir, "lib", "libvkm-static"+buildOptions.Type.FileExt(c.Target.OS)), buildOptions)
 			if err != nil {
@@ -259,7 +290,7 @@ func installVKM(c Config) error {
 				panic(err)
 			}
 			defer fConfig.Close()
-			_, err = fmt.Fprintf(fConfig, "#define VKM_VK_API %d\n", vkapi)
+			_, err = fmt.Fprintf(fConfig, "#define VKM_VK_API %d\n", c.VkAPI)
 			if err != nil {
 				panic(err)
 			}

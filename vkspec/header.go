@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"goarrg.com/toolchain"
@@ -62,6 +61,8 @@ func parseHeader() map[string]Type {
 			if strings.Contains(line, "#") || strings.Contains(line, "//") {
 				continue
 			}
+			// this is based on the assumption that every flags64 ends with a blank line before anything else
+			// so far this is true, but may change in the future and this line will cause a whole line to be skipped
 			if !strings.Contains(line, t) {
 				return
 			}
@@ -70,60 +71,15 @@ func parseHeader() map[string]Type {
 				if strings.HasPrefix(parts[1], "0") {
 					line = strings.TrimSuffix(line, "ULL")
 				}
+				line = strings.TrimPrefix(line, "static const ")
+				line = line[strings.Index(line, " ")+1:]
 				t := types[lastType]
 				t.Declaration = append(t.Declaration, line)
 				types[lastType] = t
 			}
 		}
 	}
-	scanFeatureStruct := func() {
-		if lastType == "VkPhysicalDeviceFeatures2" {
-			for scanner.Scan(); !strings.Contains(scanner.Text(), "}"); scanner.Scan() {
-			}
-			return
-		}
-		if lastType != "VkPhysicalDeviceFeatures" {
-			t := types[lastType]
-
-			scanner.Scan()
-			if !strings.HasPrefix(strings.TrimSpace(scanner.Text()), "VkStructureType") {
-				panic(fmt.Sprintf("%s: %s", lastType, scanner.Text()))
-			}
-			t.Declaration = append(t.Declaration, "VkStructureType sType")
-			scanner.Scan()
-			if !strings.HasPrefix(strings.TrimSpace(scanner.Text()), "void*") {
-				panic(scanner.Text())
-			}
-			t.Declaration = append(t.Declaration, "void* pNext")
-
-			types[lastType] = t
-		}
-		for scanner.Scan() {
-			str := strings.TrimSuffix(strings.TrimSpace(scanner.Text()), ";")
-			if strings.ContainsAny(str, "}") {
-				return
-			}
-			if !strings.HasPrefix(str, "VkBool32") {
-				panic(str)
-			}
-			t := types[lastType]
-			t.Declaration = append(t.Declaration, str)
-			types[lastType] = t
-		}
-	}
 	scanStruct := func() {
-		t := types[lastType]
-
-		scanner.Scan()
-		if !strings.HasPrefix(strings.TrimSpace(scanner.Text()), "VkStructureType") {
-			for scanner.Scan(); !strings.Contains(scanner.Text(), "}"); scanner.Scan() {
-			}
-			delete(types, lastType)
-			return
-		}
-		t.Declaration = append(t.Declaration, "VkStructureType sType")
-		types[lastType] = t
-
 		for scanner.Scan() {
 			str := strings.TrimSuffix(strings.TrimSpace(scanner.Text()), ";")
 			if strings.ContainsAny(str, "}") {
@@ -137,66 +93,134 @@ func parseHeader() map[string]Type {
 	for scanner.Scan() {
 		line := strings.TrimSpace(strings.TrimRight(scanner.Text(), " ,;{\n"))
 		{
+			t, ok := strings.CutPrefix(line, "VK_DEFINE_HANDLE(")
+			if ok {
+				lastType = t[:strings.Index(t, ")")]
+				types[lastType] = Type{
+					Name:        lastType,
+					Kind:        TypeKindHandle,
+					Declaration: []string{"VK_DEFINE_HANDLE"},
+				}
+				continue
+			}
+		}
+		{
+			t, ok := strings.CutPrefix(line, "VK_DEFINE_NON_DISPATCHABLE_HANDLE(")
+			if ok {
+				lastType = t[:strings.Index(t, ")")]
+				types[lastType] = Type{
+					Name:        lastType,
+					Kind:        TypeKindHandle,
+					Declaration: []string{"VK_DEFINE_NON_DISPATCHABLE_HANDLE"},
+				}
+				continue
+			}
+		}
+		{
 			t, ok := strings.CutPrefix(line, "typedef enum ")
 			if ok {
+				kind := TypeKindEnum32
 				lastType = strings.ReplaceAll(t, "FlagBits", "Flags")
+				if strings.Contains(lastType, "Flags") {
+					kind = TypeKindBitFlag32
+				}
+				lastType = strings.TrimSpace(lastType)
 				types[lastType] = Type{
 					Name: lastType,
+					Kind: kind,
 				}
 				scanEnum()
 				continue
 			}
 		}
 		{
+			t, ok := strings.CutPrefix(line, "typedef VkFlags ")
+			if ok {
+				// VkFlags typenames never contain "bits", that is only the enum
+				// VkFlags64 changes that
+				lastType = strings.TrimSpace(t)
+				// we need to parse flag declarations to account for reserved types,
+				// but we also cannot throw out already found bits
+				if _, exist := types[lastType]; !exist {
+					if strings.Contains(lastType, "Flags") {
+						types[lastType] = Type{
+							Name: lastType,
+							Kind: TypeKindBitFlag32,
+						}
+					} else {
+						types[lastType] = Type{
+							Name: lastType,
+							Kind: TypeKindEnum32,
+						}
+					}
+				}
+				continue
+			}
+		}
+		{
 			t, ok := strings.CutPrefix(line, "typedef VkFlags64 ")
-			if ok && strings.Contains(t, "FlagBits") {
+			if ok {
+				kind := TypeKindEnum64
 				lastType = strings.ReplaceAll(t, "FlagBits", "Flags")
-				types[lastType] = Type{
-					Name: lastType,
+				if strings.Contains(lastType, "Flags") {
+					kind = TypeKindBitFlag64
+				}
+				lastType = strings.TrimSpace(lastType)
+				if _, exist := types[lastType]; !exist {
+					types[lastType] = Type{
+						Name: lastType,
+						Kind: kind,
+					}
 				}
 				scanFlags(t)
 				continue
 			}
 		}
 		{
-			isAlias := strings.HasPrefix(line, "typedef VkPhysicalDevice")
-			isPhysicalDevice := strings.HasPrefix(line, "typedef struct VkPhysicalDevice")
-			isFeatures := strings.Contains(line, "Features")
-			if isAlias && isFeatures {
-				fields := strings.Fields(line)
-				// keep list sorted or BinarSearch doesn't work
-				blacklist := []string{
-					"VkPhysicalDeviceBufferAddressFeaturesEXT",
-					"VkPhysicalDeviceFeatures2KHR",
-					"VkPhysicalDeviceFloat16Int8FeaturesKHR",
-					"VkPhysicalDeviceShaderDrawParameterFeatures",
-					"VkPhysicalDeviceVariablePointerFeatures",
-					"VkPhysicalDeviceVariablePointerFeaturesKHR",
+			if t, ok := strings.CutPrefix(line, "typedef struct "); ok {
+				lastType = strings.TrimSpace(t)
+				types[t] = Type{
+					Name: t,
+					Kind: TypeKindStruct,
 				}
-				if _, skip := slices.BinarySearch(blacklist, fields[2]); !skip {
-					types[fields[2]] = Type{
-						Name:  fields[2],
-						Alias: fields[1],
-					}
-				}
-				continue
-			} else if isPhysicalDevice && isFeatures {
-				lastType = strings.Fields(line)[2]
-				types[lastType] = Type{
-					Name: lastType,
-				}
-				scanFeatureStruct()
+				scanStruct()
 				continue
 			}
 		}
 		{
-			if t, ok := strings.CutPrefix(line, "typedef struct "); ok {
-				lastType = t
+			if t, ok := strings.CutPrefix(line, "typedef union "); ok {
+				lastType = strings.TrimSpace(t)
 				types[t] = Type{
 					Name: t,
+					Kind: TypeKindUnion,
 				}
 				scanStruct()
 				continue
+			}
+		}
+		{
+			if t, ok := strings.CutPrefix(line, "typedef "); ok && !strings.ContainsAny(t, "()") {
+				fields := strings.Fields(t)
+				fields[0] = strings.TrimSpace(strings.ReplaceAll(fields[0], "FlagBits", "Flags"))
+				fields[1] = strings.TrimSpace(strings.ReplaceAll(fields[1], "FlagBits", "Flags"))
+				if _, exist := types[fields[1]]; !exist {
+					if !isTypeBlacklisted(fields[1]) {
+						switch {
+						case strings.HasPrefix(fields[0], "uint"),
+							strings.HasPrefix(fields[0], "void"):
+							types[fields[1]] = Type{
+								Name:        fields[1],
+								Kind:        TypeKindBaseType,
+								Declaration: []string{fields[0]},
+							}
+						default:
+							types[fields[1]] = Type{
+								Name:  fields[1],
+								Alias: fields[0],
+							}
+						}
+					}
+				}
 			}
 		}
 	}
@@ -207,6 +231,10 @@ func parseHeader() map[string]Type {
 			for alias.Alias != "" {
 				alias = types[alias.Alias]
 			}
+			if alias.Name == "" {
+				panic(fmt.Sprintf("Type %q marked as alias but %q not found", t.Name, t.Alias))
+			}
+			t.Kind = alias.Kind
 			t.Declaration = alias.Declaration
 			types[k] = t
 		}
