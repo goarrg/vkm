@@ -200,6 +200,9 @@ func Parse(config ParseConfig) Data {
 		filteredExtensions := map[string]Extension{}
 
 		insertDependency := func(k string, depends []string) []string {
+			if k == "" {
+				return depends
+			}
 			i, found := slices.BinarySearch(depends, k)
 			if found {
 				return depends
