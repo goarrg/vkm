@@ -28,8 +28,10 @@ limitations under the License.
 namespace vkm::vk::device {
 void setupVMA(vkm::vk::device::instance* device) noexcept {
 	// VMA version check to make sure we update the function struct.
+	// We cannot use VMA_VULKAN_VERSION here as there was an update that
+	// changed the struct without changing VMA_VULKAN_VERSION.
 	// NOLINTNEXTLINE(misc-redundant-expression)
-	static_assert(VMA_VULKAN_VERSION == 1004000);
+	static_assert(VMA_VERSION == 0xc04000);
 	const VmaVulkanFunctions vkFns = {
 		VK_PROC(vkGetInstanceProcAddr),
 		VK_PROC(vkGetDeviceProcAddr),
@@ -57,6 +59,8 @@ void setupVMA(vkm::vk::device::instance* device) noexcept {
 		VK_PROC(vkGetPhysicalDeviceMemoryProperties2),
 		VK_PROC_DEVICE(device, vkGetDeviceBufferMemoryRequirements),
 		VK_PROC_DEVICE(device, vkGetDeviceImageMemoryRequirements),
+		nullptr,
+		VK_PROC(vkGetPhysicalDeviceProperties2),
 	};
 
 	VmaAllocatorCreateInfo allocatorInfo = {};
