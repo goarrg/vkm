@@ -17,6 +17,7 @@ limitations under the License.
 package vkspec
 
 import (
+	"fmt"
 	"maps"
 	"slices"
 	"strconv"
@@ -41,6 +42,20 @@ type Type struct {
 	Alias       string
 	Kind        TypeKind
 	Declaration []string
+	Depends     []string
+}
+
+type EnumValue struct {
+	Name    string
+	Alias   string
+	Value   string
+	Depends []string
+}
+type Enum struct {
+	Name    string
+	Alias   string
+	Values  map[string]EnumValue
+	Depends []string
 }
 
 type Handle struct {
@@ -49,6 +64,7 @@ type Handle struct {
 	Alias       string
 	Parent      string
 	Declaration string
+	Depends     []string
 }
 
 type ParamKind uint
@@ -72,15 +88,17 @@ type Param struct {
 }
 
 type Struct struct {
-	Name   string
-	Alias  string
-	Params []Param
+	Name    string
+	Alias   string
+	Params  []Param
+	Depends []string
 }
 
 type Union struct {
-	Name   string
-	Alias  string
-	Params []Param
+	Name    string
+	Alias   string
+	Params  []Param
+	Depends []string
 }
 
 type Command struct {
@@ -88,6 +106,7 @@ type Command struct {
 	Name       string
 	Alias      string
 	Params     []Param
+	Depends    []string
 }
 
 type Exports struct {
@@ -97,6 +116,16 @@ type Exports struct {
 	Commands []string
 }
 
+type CoreVersion struct {
+	VersionString string
+	Exports       Exports
+}
+
+type Platform struct {
+	Name  string
+	Guard string
+}
+
 type Extension struct {
 	Name          string
 	FeatureStruct string
@@ -104,23 +133,19 @@ type Extension struct {
 	Platform      string
 	Promoted      string
 	Deprecated    string
-	Provisional   bool
 	Depends       string
-	Exports       Exports
-}
-
-type CoreVersion struct {
-	VersionString string
 	Exports       Exports
 }
 
 type Data struct {
 	Types        map[string]Type
+	Enums        map[string]Enum
 	Handles      map[string]Handle
 	Structs      map[string]Struct
 	Unions       map[string]Union
 	Commands     map[string]Command
 	CoreVersions map[string]CoreVersion
+	Platforms    map[string]Platform
 	Extensions   map[string]Extension
 }
 
@@ -136,70 +161,158 @@ type ParseConfig struct {
 }
 
 func Parse(config ParseConfig) Data {
-	d := Data{
-		Types: parseHeader(),
-	}
-	xmlData := parseXML()
+	d := Data{}
+
+	var parsedExtensions xmlExtensions
 	{
+		xmlData := parseXML()
 		types := xmlData["types"].(xmlTypes)
 		d.Handles = types.handles
 		d.Structs = types.structs
 		d.Unions = types.unions
+
+		d.Commands = xmlData["commands"].(xmlCommands)
+		d.CoreVersions = xmlData["feature"].(xmlFeatures)
+		d.Platforms = xmlData["platforms"].(xmlPlatforms)
+
+		parsedExtensions = xmlData["extensions"].(xmlExtensions)
 	}
-	d.Commands = xmlData["commands"].(xmlCommands)
-	d.CoreVersions = xmlData["feature"].(xmlFeatures)
+
+	// we need to parse xml before the header as we need the list of platforms,
+	// then blacklist platforms we cannot find the header of
+	var blacklistedPlatforms map[string]bool
+	d.Types, blacklistedPlatforms = parseHeader(d.Platforms)
 
 	// type and cmd information is global with no origin identifying information
 	// we have to filter them to remove ones from extensions we do not report
 	// e.g. vulkansc only extensions
 	// this also automatically filters out type information from filtered extensions
 	{
-		parsedExtensions := xmlData["extensions"].(xmlExtensions)
 		blackListedEnums := map[string]bool{}
 		whiteListedEnums := map[string]bool{}
 
 		filteredTypes := map[string]Type{}
+		FilteredEnums := map[string]Enum{}
 		filteredHandles := map[string]Handle{}
 		filteredStructs := map[string]Struct{}
 		filteredUnions := map[string]Union{}
 		filteredCmds := map[string]Command{}
 		filteredExtensions := map[string]Extension{}
 
-		filterExports := func(e Exports) {
+		insertDependency := func(k string, depends []string) []string {
+			i, found := slices.BinarySearch(depends, k)
+			if found {
+				return depends
+			}
+			return slices.Insert(depends, i, k)
+		}
+		filterExports := func(dependency string, e Exports) {
 			for _, k := range e.Types {
 				if t, ok := d.Structs[k]; ok {
+					t.Depends = insertDependency(dependency, t.Depends)
+					d.Structs[k] = t
 					filteredStructs[k] = t
 				}
 				if t, ok := d.Unions[k]; ok {
+					t.Depends = insertDependency(dependency, t.Depends)
+					d.Unions[k] = t
 					filteredUnions[k] = t
 				}
 				if t, ok := d.Types[k]; ok {
+					t.Depends = insertDependency(dependency, t.Depends)
+					d.Types[k] = t
 					filteredTypes[k] = t
+
+					if t.Kind > TypeKindHandle && t.Kind < TypeKindStruct {
+						enum := FilteredEnums[k]
+						enum.Name = t.Name
+						enum.Alias = t.Alias
+						enum.Depends = insertDependency(dependency, enum.Depends)
+						if enum.Values == nil {
+							enum.Values = make(map[string]EnumValue, len(t.Declaration))
+						}
+						mapValueToEnum := map[string]string{}
+						for _, line := range t.Declaration {
+							parts := strings.Split(line, " ")
+							v := enum.Values[parts[0]]
+							v.Name = parts[0]
+							switch {
+							case strings.Contains(parts[0], "MAX_ENUM"):
+								continue
+							case strings.HasPrefix(parts[2], "VK"):
+								v.Alias = parts[2]
+							case mapValueToEnum[parts[2]] != "":
+								v.Value = parts[2]
+								v.Alias = mapValueToEnum[parts[2]]
+							default:
+								v.Value = parts[2]
+							}
+							if v.Alias == "" && mapValueToEnum[v.Name] == "" {
+								mapValueToEnum[v.Value] = v.Name
+							}
+							enum.Values[v.Name] = v
+						}
+						for k, v := range enum.Values {
+							if v.Alias != "" && v.Value == "" {
+								v.Value = enum.Values[v.Alias].Value
+								enum.Values[k] = v
+							}
+						}
+						FilteredEnums[k] = enum
+					}
+				} else if strings.HasPrefix(k, "Vk") {
+					panic(fmt.Sprintf("%s has type %q but not found in type info", dependency, k))
 				}
 			}
 			for _, k := range e.Handles {
 				if t, ok := d.Handles[k]; ok {
+					t.Depends = insertDependency(dependency, t.Depends)
+					d.Handles[k] = t
 					filteredHandles[k] = t
+				} else if strings.HasPrefix(k, "Vk") {
+					panic(fmt.Sprintf("%s has handle %q but not found in handle info", dependency, k))
 				}
 				if t, ok := d.Types[k]; ok {
+					t.Depends = insertDependency(dependency, t.Depends)
+					d.Types[k] = t
 					filteredTypes[k] = t
+				} else if strings.HasPrefix(k, "Vk") {
+					panic(fmt.Sprintf("%s has type %q but not found in type info", dependency, k))
 				}
 			}
 			for _, k := range e.Commands {
-				filteredCmds[k] = d.Commands[k]
+				cmd := d.Commands[k]
+				cmd.Depends = insertDependency(dependency, cmd.Depends)
+				d.Commands[k] = cmd
+				filteredCmds[k] = cmd
 			}
 			for k, v := range e.Enums {
-				if t, ok := d.Types[k]; ok && filteredTypes[k].Name == "" {
+				if t, ok := d.Types[k]; ok {
+					t.Depends = insertDependency(dependency, t.Depends)
+					d.Types[k] = t
 					filteredTypes[k] = t
-				}
-				for _, enum := range v {
-					whiteListedEnums[enum] = true
+
+					if FilteredEnums[k].Values == nil {
+						enum := FilteredEnums[k]
+						enum.Values = map[string]EnumValue{}
+						FilteredEnums[k] = enum
+					}
+					for _, enum := range v {
+						{
+							e := FilteredEnums[k].Values[enum]
+							e.Depends = insertDependency(dependency, e.Depends)
+							FilteredEnums[k].Values[enum] = e
+						}
+						whiteListedEnums[enum] = true
+					}
+				} else if strings.HasPrefix(k, "Vk") {
+					panic(fmt.Sprintf("%s has enum type %q but not found in type info", dependency, k))
 				}
 			}
 		}
 		{
 			maps.DeleteFunc(parsedExtensions, func(k string, e xmlExtension) bool {
-				if config.FilterExtension != nil && config.FilterExtension(e.Extension) {
+				if blacklistedPlatforms[e.Platform] || (config.FilterExtension != nil && config.FilterExtension(e.Extension)) {
 					for _, v := range e.Exports.Enums {
 						for _, enum := range v {
 							blackListedEnums[enum] = true
@@ -216,9 +329,43 @@ func Parse(config ParseConfig) Data {
 				}
 				return false
 			})
+			isCorePromoted := func(e Extension) bool {
+				if config.FilterCorePromotion == 0 {
+					return false
+				}
+				promoted := e.Promoted
+				for promoted != "" && !strings.HasPrefix(promoted, "VK_VERSION_") {
+					promoted = parsedExtensions[promoted].Promoted
+				}
+				if vkVersion, ok := strings.CutPrefix(promoted, "VK_VERSION_"); ok {
+					versionPair := strings.Split(vkVersion, "_")
+					major, err := strconv.ParseUint(versionPair[0], 10, 0)
+					if err != nil {
+						panic(err)
+					}
+					minor, err := strconv.ParseUint(versionPair[1], 10, 0)
+					if err != nil {
+						panic(err)
+					}
+					if config.FilterCorePromotion >= uint32((major<<22)|(minor<<12)) {
+						return true
+					}
+				}
+				return false
+			}
 			for k, xmlE := range parsedExtensions {
 				e := xmlE.Extension
+				isPromoted := isCorePromoted(e)
 				{
+					if isPromoted {
+						// remove feature structs as they serve no purpose, not even for apidump
+						e.Exports.Types = slices.DeleteFunc(e.Exports.Types, func(t string) bool {
+							return t == e.FeatureStruct
+						})
+						filterExports("", e.Exports)
+					} else {
+						filterExports(e.Name, e.Exports)
+					}
 					for depends, exports := range xmlE.DependentExports {
 						if _, ok := parsedExtensions[depends]; !ok {
 							for _, v := range exports.Enums {
@@ -228,45 +375,42 @@ func Parse(config ParseConfig) Data {
 							}
 							continue
 						}
-						maps.Insert(e.Exports.Enums, maps.All(exports.Enums))
-						e.Exports.Types = append(e.Exports.Types, exports.Types...)
-						e.Exports.Handles = append(e.Exports.Handles, exports.Handles...)
-						e.Exports.Commands = append(e.Exports.Commands, exports.Commands...)
-					}
-				}
-				if config.FilterCorePromotion != 0 {
-					promoted := e.Promoted
-					for promoted != "" && !strings.HasPrefix(promoted, "VK_VERSION_") {
-						promoted = parsedExtensions[promoted].Promoted
-					}
-					if vkVersion, ok := strings.CutPrefix(promoted, "VK_VERSION_"); ok {
-						versionPair := strings.Split(vkVersion, "_")
-						major, err := strconv.ParseUint(versionPair[0], 10, 0)
-						if err != nil {
-							panic(err)
-						}
-						minor, err := strconv.ParseUint(versionPair[1], 10, 0)
-						if err != nil {
-							panic(err)
-						}
-						if config.FilterCorePromotion >= uint32((major<<22)|(minor<<12)) {
-							// remove feature structs as they serve no purpose, not even for apidump
-							e.Exports.Types = slices.DeleteFunc(e.Exports.Types, func(t string) bool {
-								return t == e.FeatureStruct
-							})
-							filterExports(e.Exports)
-							continue
+						if isPromoted {
+							if isCorePromoted(parsedExtensions[depends].Extension) {
+								filterExports("", exports)
+							} else {
+								filterExports(depends, exports)
+							}
+						} else {
+							filterExports(e.Name, exports)
+							filterExports(depends, exports)
+							maps.Insert(e.Exports.Enums, maps.All(exports.Enums))
+							e.Exports.Types = append(e.Exports.Types, exports.Types...)
+							e.Exports.Handles = append(e.Exports.Handles, exports.Handles...)
+							e.Exports.Commands = append(e.Exports.Commands, exports.Commands...)
 						}
 					}
 				}
-				filteredExtensions[k] = e
+				if !isPromoted {
+					filteredExtensions[k] = e
+				}
 			}
 		}
 		for _, v := range d.CoreVersions {
-			filterExports(v.Exports)
-		}
-		for _, e := range filteredExtensions {
-			filterExports(e.Exports)
+			versionPair := strings.Split(v.VersionString, ".")
+			major, err := strconv.ParseUint(versionPair[0], 10, 0)
+			if err != nil {
+				panic(err)
+			}
+			minor, err := strconv.ParseUint(versionPair[1], 10, 0)
+			if err != nil {
+				panic(err)
+			}
+			if config.FilterCorePromotion >= uint32((major<<22)|(minor<<12)) {
+				filterExports("", v.Exports)
+			} else {
+				filterExports(v.VersionString, v.Exports)
+			}
 		}
 		// remove enums, likely aliased, from extensions we don't keep
 		{
@@ -286,6 +430,11 @@ func Parse(config ParseConfig) Data {
 					})
 				}
 				filteredTypes[k] = v
+			}
+			for _, enum := range FilteredEnums {
+				maps.DeleteFunc(enum.Values, func(k string, v EnumValue) bool {
+					return v.Name == "" || blackListedEnums[v.Name]
+				})
 			}
 		}
 		// remove object types for handles we don't keep
@@ -321,6 +470,7 @@ func Parse(config ParseConfig) Data {
 			filteredTypes["VkStructureType"] = v
 		}
 		d.Types = filteredTypes
+		d.Enums = FilteredEnums
 		d.Handles = filteredHandles
 		d.Structs = filteredStructs
 		d.Unions = filteredUnions

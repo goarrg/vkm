@@ -50,6 +50,7 @@ type xmlTypes struct {
 	unions  map[string]Union
 }
 type (
+	xmlPlatforms  map[string]Platform
 	xmlEnums      map[string][]string
 	xmlCommands   map[string]Command
 	xmlExtensions map[string]xmlExtension
@@ -58,6 +59,7 @@ type (
 
 func parseXML() map[string]any {
 	parsers := map[string]func(xmlParserInterface, xml.StartElement, any) any{
+		"platforms":  xmlParsePlatforms,
 		"types":      xmlParseTypes,
 		"commands":   xmlParseCommands,
 		"extensions": xmlParseExtensions,
@@ -185,24 +187,21 @@ func parseXML() map[string]any {
 		extensions := result["extensions"].(xmlExtensions)
 		coreVersions := result["feature"].(xmlFeatures)
 
-		// version 1.0 in the xml does not contain any of the defined flags,
+		// core versions and extensions in the xml does not contain any of the defined flags,
 		// we have to manually add them back after scanning for enums
-		{
-			coreVersions := result["feature"].(xmlFeatures)
-			core := coreVersions["1.0"]
-			for _, t := range core.Exports.Types {
+		addEnumValues := func(e *Exports) {
+			for _, t := range e.Types {
 				if len(enums[t]) > 0 && !isEnumTypeBlacklisted(t) {
-					core.Exports.Enums[t] = append(core.Exports.Enums[t], enums[t]...)
+					e.Enums[t] = append(e.Enums[t], enums[t]...)
 				}
 			}
-			core.Exports.Types = slices.DeleteFunc(core.Exports.Types, func(t string) bool {
+			e.Types = slices.DeleteFunc(e.Types, func(t string) bool {
 				blacklist := map[string]bool{
 					"VkBaseInStructure":  true,
 					"VkBaseOutStructure": true,
 				}
 				return blacklist[t]
 			})
-			coreVersions["1.0"] = core
 		}
 		filterHandles := func(e *Exports) {
 			for _, k := range e.Types {
@@ -217,10 +216,12 @@ func parseXML() map[string]any {
 			}
 		}
 		for _, v := range coreVersions {
+			addEnumValues(&v.Exports)
 			filterHandles(&v.Exports)
 			coreVersions[v.VersionString] = v
 		}
 		for _, e := range extensions {
+			addEnumValues(&e.Exports)
 			filterHandles(&e.Exports)
 			extensions[e.Name] = e
 		}
@@ -229,6 +230,49 @@ func parseXML() map[string]any {
 		result["extensions"] = extensions
 	}
 
+	return result
+}
+
+func xmlParsePlatforms(vkxml xmlParserInterface, _ xml.StartElement, _ any) any {
+	result := xmlPlatforms{}
+	for {
+		node, err := vkxml.findNextElement()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			panic(err)
+		}
+		if node.Name.Local != "platform" {
+			err := vkxml.skip()
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				panic(err)
+			}
+			continue
+		}
+		{
+			name := vkxml.findAttribute(node.Attr, "name").Value
+			guard := vkxml.findAttribute(node.Attr, "protect").Value
+			// the header files are generated in the pattern of "vulkan_<platform>", EXCEPT for provisional,
+			// provisional is vulkan_beta.h, fix that
+			if name == "provisional" {
+				name = "beta"
+			}
+			result[name] = Platform{
+				Name:  name,
+				Guard: guard,
+			}
+		}
+		{
+			_, err := vkxml.findElementEnd()
+			if err != nil {
+				panic(err)
+			}
+		}
+	}
 	return result
 }
 
@@ -697,22 +741,29 @@ func xmlParseExports(vkxml xmlParserInterface, node xml.StartElement, e *Exports
 		if typename != "" && !isTypeBlacklisted(typename) && !isEnumTypeBlacklisted(typename) {
 			valuename := vkxml.findAttribute(node.Attr, "name").Value
 			t := strings.ReplaceAll(typename, "FlagBits", "Flags")
-			i, _ := slices.BinarySearch(e.Enums[t], valuename)
-			e.Enums[t] = slices.Insert(e.Enums[t], i, valuename)
+			i, seen := slices.BinarySearch(e.Enums[t], valuename)
+			if !seen {
+				e.Enums[t] = slices.Insert(e.Enums[t], i, valuename)
+			}
 		}
 	case "type":
 		typename := vkxml.findAttribute(node.Attr, "name").Value
 		// we do not want function pointers
 		if typename != "" && !strings.HasPrefix(typename, "PFN") &&
 			!isTypeBlacklisted(typename) {
-			i, _ := slices.BinarySearch(e.Types, typename)
-			e.Types = slices.Insert(e.Types, i, typename)
+			t := strings.ReplaceAll(typename, "FlagBits", "Flags")
+			i, seen := slices.BinarySearch(e.Types, t)
+			if !seen {
+				e.Types = slices.Insert(e.Types, i, t)
+			}
 		}
 	case "command":
 		typename := vkxml.findAttribute(node.Attr, "name").Value
 		if typename != "" && !isTypeBlacklisted(typename) {
-			i, _ := slices.BinarySearch(e.Commands, typename)
-			e.Commands = slices.Insert(e.Commands, i, typename)
+			i, seen := slices.BinarySearch(e.Commands, typename)
+			if !seen {
+				e.Commands = slices.Insert(e.Commands, i, typename)
+			}
 		}
 	case "comment":
 	default:
@@ -765,8 +816,9 @@ func xmlParseExtensions(vkxml xmlParserInterface, _ xml.StartElement, _ any) any
 				if e.Platform != "provisional" {
 					panic(fmt.Sprintf("%q has unexpected platform=%q with provisional=true", e.Name, e.Platform))
 				}
-				e.Platform = ""
-				e.Provisional = true
+				// the header files are generated in the pattern of "vulkan_<platform>", EXCEPT for provisional,
+				// provisional is vulkan_beta.h, fix that
+				e.Platform = "beta"
 			}
 			if strings.Contains(e.Platform, "provisional") {
 				panic(fmt.Sprintf("%q has unexpected platform=%q without provisional=true", e.Name, e.Platform))
@@ -872,13 +924,13 @@ func xmlParseExtensions(vkxml xmlParserInterface, _ xml.StartElement, _ any) any
 func xmlParseEnums(vkxml xmlParserInterface, start xml.StartElement, result any) any {
 	enums := result.(xmlEnums)
 
-	rootType := vkxml.findAttribute(start.Attr, "type")
-	rootName := vkxml.findAttribute(start.Attr, "name")
+	rootType := vkxml.findAttribute(start.Attr, "type").Value
+	rootName := strings.ReplaceAll(vkxml.findAttribute(start.Attr, "name").Value, "FlagBits", "Flags")
 
-	switch rootType.Value {
-	case "enum":
+	switch rootType {
+	case "enum", "bitmask":
 	case "constants":
-		rootName.Value = "constants"
+		rootName = "constants"
 	default:
 		if err := vkxml.skip(); err != nil {
 			panic(err)
@@ -897,7 +949,7 @@ func xmlParseEnums(vkxml xmlParserInterface, start xml.StartElement, result any)
 		switch node.Name.Local {
 		case "enum":
 			nodeName := vkxml.findAttribute(node.Attr, "name")
-			enums[rootName.Value] = append(enums[rootName.Value], nodeName.Value)
+			enums[rootName] = append(enums[rootName], nodeName.Value)
 		}
 		_, err = vkxml.findElementEnd()
 		if err != nil {

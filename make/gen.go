@@ -55,9 +55,6 @@ func genNonShipables(srcDir, buildDir string, vkapi uint32) {
 	}
 	data := vkspec.Parse(vkspec.ParseConfig{
 		FilterCorePromotion: vkapi,
-		FilterExtension: func(e vkspec.Extension) bool {
-			return e.Provisional
-		},
 	})
 	genDispatchTable(srcDir, buildDir, data)
 	genStructReflection(srcDir, buildDir, data)
