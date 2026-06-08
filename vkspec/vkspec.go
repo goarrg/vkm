@@ -164,6 +164,7 @@ func Parse(config ParseConfig) Data {
 	d := Data{}
 
 	var parsedExtensions xmlExtensions
+	var parsedVideoExports Exports
 	{
 		xmlData := parseXML()
 		types := xmlData["types"].(xmlTypes)
@@ -176,6 +177,7 @@ func Parse(config ParseConfig) Data {
 		d.Platforms = xmlData["platforms"].(xmlPlatforms)
 
 		parsedExtensions = xmlData["extensions"].(xmlExtensions)
+		parsedVideoExports = xmlData["video"].(Exports)
 	}
 
 	// we need to parse xml before the header as we need the list of platforms,
@@ -313,6 +315,7 @@ func Parse(config ParseConfig) Data {
 				}
 			}
 		}
+		filterExports("", parsedVideoExports)
 		{
 			maps.DeleteFunc(parsedExtensions, func(k string, e xmlExtension) bool {
 				if blacklistedPlatforms[e.Platform] || (config.FilterExtension != nil && config.FilterExtension(e.Extension)) {

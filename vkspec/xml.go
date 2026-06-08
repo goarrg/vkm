@@ -58,99 +58,102 @@ type (
 )
 
 func parseXML() map[string]any {
-	parsers := map[string]func(xmlParserInterface, xml.StartElement, any) any{
-		"platforms":  xmlParsePlatforms,
-		"types":      xmlParseTypes,
-		"commands":   xmlParseCommands,
-		"extensions": xmlParseExtensions,
-		"enums":      xmlParseEnums,
-		"feature":    xmlParseFeature,
-	}
 	result := map[string]any{
+		"types": xmlTypes{
+			handles: map[string]Handle{},
+			structs: map[string]Struct{},
+			unions:  map[string]Union{},
+		},
 		"enums":   xmlEnums{},
 		"feature": xmlFeatures{},
 	}
-
-	docs := filepath.Join(cgodep.InstallDir("vulkan-docs", toolchain.Target{}, toolchain.BuildRelease), "xml", "vk.xml")
-	fIn, err := os.Open(docs)
-	if err != nil {
-		panic(err)
-	}
-
-	{
-		decoder := xml.NewDecoder(fIn)
-		var unProcessedToken xml.Token
-		findNextElement := func() (xml.StartElement, error) {
-			var err error
-			t := unProcessedToken
-			unProcessedToken = nil
-			if t == nil {
-				t, err = decoder.Token()
-			}
-			for {
-				if err != nil {
-					return xml.StartElement{}, err
-				}
-				if start, ok := t.(xml.StartElement); ok {
-					return start, nil
-				}
-				if _, ok := t.(xml.EndElement); ok {
-					return xml.StartElement{}, io.EOF
-				}
-				t, err = decoder.Token()
-			}
+	var decoder *xml.Decoder
+	var unProcessedToken xml.Token
+	findNextElement := func() (xml.StartElement, error) {
+		var err error
+		t := unProcessedToken
+		unProcessedToken = nil
+		if t == nil {
+			t, err = decoder.Token()
 		}
-		findNextString := func() (string, error) {
-			t, err := decoder.Token()
+		for {
 			if err != nil {
-				return "", err
+				return xml.StartElement{}, err
 			}
-			if c, ok := t.(xml.CharData); ok {
-				return string(c), nil
+			if start, ok := t.(xml.StartElement); ok {
+				return start, nil
 			}
-			unProcessedToken = t
-			return "", io.EOF
+			if _, ok := t.(xml.EndElement); ok {
+				return xml.StartElement{}, io.EOF
+			}
+			t, err = decoder.Token()
 		}
-		findElementEnd := func() (xml.EndElement, error) {
-			var err error
-			t := unProcessedToken
-			unProcessedToken = nil
-			if t == nil {
-				t, err = decoder.Token()
+	}
+	findNextString := func() (string, error) {
+		t, err := decoder.Token()
+		if err != nil {
+			return "", err
+		}
+		if c, ok := t.(xml.CharData); ok {
+			return string(c), nil
+		}
+		unProcessedToken = t
+		return "", io.EOF
+	}
+	findElementEnd := func() (xml.EndElement, error) {
+		var err error
+		t := unProcessedToken
+		unProcessedToken = nil
+		if t == nil {
+			t, err = decoder.Token()
+		}
+		started := 0
+		for {
+			if err != nil {
+				return xml.EndElement{}, err
 			}
-			started := 0
-			for {
-				if err != nil {
-					return xml.EndElement{}, err
+			if _, ok := t.(xml.StartElement); ok {
+				started += 1
+			}
+			if end, ok := t.(xml.EndElement); ok {
+				if started > 0 {
+					started -= 1
+				} else {
+					return end, nil
 				}
-				if _, ok := t.(xml.StartElement); ok {
-					started += 1
+			}
+			t, err = decoder.Token()
+		}
+	}
+	findAttribute := func(attrs []xml.Attr, names ...string) xml.Attr {
+		for _, name := range names {
+			for _, a := range attrs {
+				if a.Name.Local == name {
+					return a
 				}
-				if end, ok := t.(xml.EndElement); ok {
-					if started > 0 {
-						started -= 1
-					} else {
-						return end, nil
-					}
-				}
-				t, err = decoder.Token()
 			}
 		}
-		findAttribute := func(attrs []xml.Attr, names ...string) xml.Attr {
-			for _, name := range names {
-				for _, a := range attrs {
-					if a.Name.Local == name {
-						return a
-					}
-				}
-			}
-			return xml.Attr{}
+		return xml.Attr{}
+	}
+	line := func() int {
+		l, _ := decoder.InputPos()
+		return l
+	}
+	{
+		parsers := map[string]func(xmlParserInterface, xml.StartElement, any) any{
+			"platforms":  xmlParsePlatforms,
+			"types":      xmlParseTypes,
+			"commands":   xmlParseCommands,
+			"extensions": xmlParseExtensions,
+			"enums":      xmlParseEnums,
+			"feature":    xmlParseFeature,
 		}
-		line := func() int {
-			l, _ := decoder.InputPos()
-			return l
+		docs := filepath.Join(cgodep.InstallDir("vulkan-docs", toolchain.Target{}, toolchain.BuildRelease), "xml", "vk.xml")
+		fIn, err := os.Open(docs)
+		if err != nil {
+			panic(err)
 		}
-
+		decoder = xml.NewDecoder(fIn)
 		registry, err := findNextElement()
 		if err != nil {
 			panic(err)
@@ -175,6 +178,50 @@ func parseXML() map[string]any {
 					line:            line,
 					skip:            decoder.Skip,
 				}, next, result[next.Name.Local])
+			} else {
+				decoder.Skip()
+			}
+		}
+	}
+	{
+		parsers := map[string]func(xmlParserInterface, xml.StartElement, any) any{
+			"types": xmlParseTypes,
+			"enums": xmlParseEnums,
+		}
+
+		docs := filepath.Join(cgodep.InstallDir("vulkan-docs", toolchain.Target{}, toolchain.BuildRelease), "xml", "video.xml")
+		fIn, err := os.Open(docs)
+		if err != nil {
+			panic(err)
+		}
+		decoder = xml.NewDecoder(fIn)
+		registry, err := findNextElement()
+		if err != nil {
+			panic(err)
+		}
+		if registry.Name.Local != "registry" {
+			panic(fmt.Sprintf("unknown xml format %s", registry.Name.Local))
+		}
+		for {
+			next, err := findNextElement()
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				panic(err)
+			}
+			pi := xmlParserInterface{
+				findNextElement: findNextElement,
+				findNextString:  findNextString,
+				findElementEnd:  findElementEnd,
+				findAttribute:   findAttribute,
+				line:            line,
+				skip:            decoder.Skip,
+			}
+			if fn, ok := parsers[next.Name.Local]; ok {
+				result[next.Name.Local] = fn(pi, next, result[next.Name.Local])
+			} else if next.Name.Local == "extensions" {
+				result["video"] = xmlParseVideoExtensions(pi, next, result["video"])
 			} else {
 				decoder.Skip()
 			}
@@ -276,12 +323,8 @@ func xmlParsePlatforms(vkxml xmlParserInterface, _ xml.StartElement, _ any) any 
 	return result
 }
 
-func xmlParseTypes(vkxml xmlParserInterface, _ xml.StartElement, _ any) any {
-	result := xmlTypes{
-		handles: map[string]Handle{},
-		structs: map[string]Struct{},
-		unions:  map[string]Union{},
-	}
+func xmlParseTypes(vkxml xmlParserInterface, _ xml.StartElement, result any) any {
+	types := result.(xmlTypes)
 	type xmlTypeParser struct {
 		fn   func(xmlParserInterface, xml.StartElement, any)
 		data any
@@ -289,15 +332,15 @@ func xmlParseTypes(vkxml xmlParserInterface, _ xml.StartElement, _ any) any {
 	parsers := map[string]xmlTypeParser{
 		"handle": {
 			fn:   xmlParseHandles,
-			data: result.handles,
+			data: types.handles,
 		},
 		"struct": {
 			fn:   xmlParseStructs,
-			data: result.structs,
+			data: types.structs,
 		},
 		"union": {
 			fn:   xmlParseUnions,
-			data: result.unions,
+			data: types.unions,
 		},
 	}
 	for {
@@ -322,35 +365,35 @@ func xmlParseTypes(vkxml xmlParserInterface, _ xml.StartElement, _ any) any {
 		}
 	}
 
-	for k, t := range result.handles {
+	for k, t := range types.handles {
 		if t.Alias != "" {
-			alias := result.handles[t.Alias]
+			alias := types.handles[t.Alias]
 			for alias.Alias != "" {
-				alias = result.handles[alias.Alias]
+				alias = types.handles[alias.Alias]
 			}
 			if alias.Name == "" {
 				panic(fmt.Sprintf("Type %q marked as alias but %q not found", t.Name, t.Alias))
 			}
 			t.Parent = alias.Parent
 			t.Declaration = alias.Declaration
-			result.handles[k] = t
+			types.handles[k] = t
 		}
 	}
 
-	for _, s := range result.structs {
+	for _, s := range types.structs {
 		if s.Alias != "" {
-			alias := result.structs[s.Alias]
+			alias := types.structs[s.Alias]
 			for alias.Alias != "" {
-				alias = result.structs[alias.Alias]
+				alias = types.structs[alias.Alias]
 			}
 			if alias.Name == "" {
 				panic(fmt.Sprintf("Struct %q marked as alias but %q not found", s.Name, s.Alias))
 			}
 			s.Params = alias.Params
-			result.structs[s.Name] = s
+			types.structs[s.Name] = s
 		}
 	}
-	return result
+	return types
 }
 
 func xmlParseHandles(vkxml xmlParserInterface, start xml.StartElement, result any) {
@@ -750,6 +793,7 @@ func xmlParseExports(vkxml xmlParserInterface, node xml.StartElement, e *Exports
 		typename := vkxml.findAttribute(node.Attr, "name").Value
 		// we do not want function pointers
 		if typename != "" && !strings.HasPrefix(typename, "PFN") &&
+			!strings.HasSuffix(typename, ".h") &&
 			!isTypeBlacklisted(typename) {
 			t := strings.ReplaceAll(typename, "FlagBits", "Flags")
 			i, seen := slices.BinarySearch(e.Types, t)
@@ -919,6 +963,93 @@ func xmlParseExtensions(vkxml xmlParserInterface, _ xml.StartElement, _ any) any
 	}
 
 	return extensions
+}
+
+func xmlParseVideoExports(vkxml xmlParserInterface, node xml.StartElement, e *Exports) {
+	switch node.Name.Local {
+	case "enum":
+		typename := vkxml.findAttribute(node.Attr, "extends").Value
+		if typename != "" && !isTypeBlacklisted(typename) && !isEnumTypeBlacklisted(typename) {
+			valuename := vkxml.findAttribute(node.Attr, "name").Value
+			t := strings.ReplaceAll(typename, "FlagBits", "Flags")
+			i, seen := slices.BinarySearch(e.Enums[t], valuename)
+			if !seen {
+				e.Enums[t] = slices.Insert(e.Enums[t], i, valuename)
+			}
+		}
+	case "type":
+		typename := vkxml.findAttribute(node.Attr, "name").Value
+		// we do not want function pointers
+		if typename != "" && !strings.HasPrefix(typename, "PFN") &&
+			!strings.HasSuffix(typename, ".h") &&
+			!isTypeBlacklisted(typename) {
+			t := strings.ReplaceAll(typename, "FlagBits", "Flags")
+			i, seen := slices.BinarySearch(e.Types, t)
+			if !seen {
+				e.Types = slices.Insert(e.Types, i, t)
+			}
+		}
+	case "comment":
+	default:
+		debug.WPrintln("Unhandled element:", node.Name.Local, "line", vkxml.line())
+	}
+}
+
+func xmlParseVideoExtensions(vkxml xmlParserInterface, _ xml.StartElement, _ any) any {
+	exports := Exports{
+		Enums: map[string][]string{},
+	}
+	for {
+		start, err := vkxml.findNextElement()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			panic(err)
+		}
+		{
+			rootSupported := vkxml.findAttribute(start.Attr, "supported")
+			if !slices.Contains(strings.Split(rootSupported.Value, ","), "vulkan") {
+				if err := vkxml.skip(); err != nil {
+					panic(err)
+				}
+				continue
+			}
+			for {
+				node, err := vkxml.findNextElement()
+				if err != nil {
+					if errors.Is(err, io.EOF) {
+						break
+					}
+					panic(err)
+				}
+				switch node.Name.Local {
+				case "require":
+					for {
+						t, err := vkxml.findNextElement()
+						if err != nil {
+							if errors.Is(err, io.EOF) {
+								break
+							}
+							panic(err)
+						}
+						_, err = vkxml.findElementEnd()
+						if err != nil {
+							panic(err)
+						}
+						xmlParseVideoExports(vkxml, t, &exports)
+					}
+
+				default:
+					err = vkxml.skip()
+					if err != nil {
+						panic(err)
+					}
+				}
+			}
+		}
+	}
+	return exports
 }
 
 func xmlParseEnums(vkxml xmlParserInterface, start xml.StartElement, result any) any {
