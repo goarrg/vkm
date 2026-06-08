@@ -194,7 +194,7 @@ func Parse(config ParseConfig) Data {
 		whiteListedEnums := map[string]bool{}
 
 		filteredTypes := map[string]Type{}
-		FilteredEnums := map[string]Enum{}
+		filteredEnums := map[string]Enum{}
 		filteredHandles := map[string]Handle{}
 		filteredStructs := map[string]Struct{}
 		filteredUnions := map[string]Union{}
@@ -214,6 +214,16 @@ func Parse(config ParseConfig) Data {
 		filterExports := func(dependency string, e Exports) {
 			for _, k := range e.Types {
 				if t, ok := d.Structs[k]; ok {
+					if len(t.Params) > 0 && t.Params[0].TypeName == "VkStructureType" {
+						e := filteredEnums["VkStructureType"]
+						if e.Values == nil {
+							e.Values = map[string]EnumValue{}
+						}
+						v := e.Values[t.Params[0].AllowedValues]
+						v.Depends = insertDependency(dependency, v.Depends)
+						e.Values[t.Params[0].AllowedValues] = v
+						filteredEnums["VkStructureType"] = e
+					}
 					t.Depends = insertDependency(dependency, t.Depends)
 					d.Structs[k] = t
 					filteredStructs[k] = t
@@ -229,7 +239,7 @@ func Parse(config ParseConfig) Data {
 					filteredTypes[k] = t
 
 					if t.Kind > TypeKindHandle && t.Kind < TypeKindStruct {
-						enum := FilteredEnums[k]
+						enum := filteredEnums[k]
 						enum.Name = t.Name
 						enum.Alias = t.Alias
 						enum.Depends = insertDependency(dependency, enum.Depends)
@@ -263,7 +273,7 @@ func Parse(config ParseConfig) Data {
 								enum.Values[k] = v
 							}
 						}
-						FilteredEnums[k] = enum
+						filteredEnums[k] = enum
 					}
 				} else if strings.HasPrefix(k, "Vk") {
 					panic(fmt.Sprintf("%s has type %q but not found in type info", dependency, k))
@@ -271,6 +281,16 @@ func Parse(config ParseConfig) Data {
 			}
 			for _, k := range e.Handles {
 				if t, ok := d.Handles[k]; ok {
+					{
+						e := filteredEnums["VkObjectType"]
+						if e.Values == nil {
+							e.Values = map[string]EnumValue{}
+						}
+						v := e.Values[t.ObjectType]
+						v.Depends = insertDependency(dependency, v.Depends)
+						e.Values[t.ObjectType] = v
+						filteredEnums["VkObjectType"] = e
+					}
 					t.Depends = insertDependency(dependency, t.Depends)
 					d.Handles[k] = t
 					filteredHandles[k] = t
@@ -293,20 +313,19 @@ func Parse(config ParseConfig) Data {
 			}
 			for k, v := range e.Enums {
 				if t, ok := d.Types[k]; ok {
-					t.Depends = insertDependency(dependency, t.Depends)
 					d.Types[k] = t
 					filteredTypes[k] = t
 
-					if FilteredEnums[k].Values == nil {
-						enum := FilteredEnums[k]
+					if filteredEnums[k].Values == nil {
+						enum := filteredEnums[k]
 						enum.Values = map[string]EnumValue{}
-						FilteredEnums[k] = enum
+						filteredEnums[k] = enum
 					}
 					for _, enum := range v {
 						{
-							e := FilteredEnums[k].Values[enum]
+							e := filteredEnums[k].Values[enum]
 							e.Depends = insertDependency(dependency, e.Depends)
-							FilteredEnums[k].Values[enum] = e
+							filteredEnums[k].Values[enum] = e
 						}
 						whiteListedEnums[enum] = true
 					}
@@ -437,10 +456,40 @@ func Parse(config ParseConfig) Data {
 				}
 				filteredTypes[k] = v
 			}
-			for _, enum := range FilteredEnums {
+			for _, enum := range filteredEnums {
 				maps.DeleteFunc(enum.Values, func(k string, v EnumValue) bool {
 					return v.Name == "" || blackListedEnums[v.Name]
 				})
+				alias := filteredEnums[enum.Alias]
+				if enum.Alias != "" {
+					{
+						values := append(slices.Collect(maps.Keys(enum.Values)),
+							slices.Collect(maps.Keys(alias.Values))...,
+						)
+						slices.Sort(values)
+						values = slices.Compact(values)
+						for _, k := range values {
+							var v EnumValue
+							if v1, found := enum.Values[k]; found {
+								v = v1
+							}
+							if v2, found := alias.Values[k]; found {
+								if v.Name != "" {
+									v.Depends = append(v.Depends, v2.Depends...)
+									slices.Sort(v.Depends)
+									v.Depends = slices.Compact(v.Depends)
+								} else {
+									v = v2
+								}
+							}
+							enum.Values[k] = v
+						}
+					}
+					filteredEnums[enum.Name] = enum
+					e2 := filteredEnums[enum.Alias]
+					e2.Values = enum.Values
+					filteredEnums[enum.Alias] = e2
+				}
 			}
 		}
 		// remove object types for handles we don't keep
@@ -476,7 +525,7 @@ func Parse(config ParseConfig) Data {
 			filteredTypes["VkStructureType"] = v
 		}
 		d.Types = filteredTypes
-		d.Enums = FilteredEnums
+		d.Enums = filteredEnums
 		d.Handles = filteredHandles
 		d.Structs = filteredStructs
 		d.Unions = filteredUnions
