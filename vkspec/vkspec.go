@@ -461,6 +461,8 @@ func Parse(config ParseConfig) Data {
 					return v.Name == "" || blackListedEnums[v.Name]
 				})
 				alias := filteredEnums[enum.Alias]
+				// extensions may extend aliased enums, this leads to inconsistencies
+				// we have to then merge the data together
 				if enum.Alias != "" {
 					{
 						values := append(slices.Collect(maps.Keys(enum.Values)),
@@ -482,14 +484,19 @@ func Parse(config ParseConfig) Data {
 									v = v2
 								}
 							}
-							enum.Values[k] = v
+							alias.Values[k] = v
 						}
 					}
-					filteredEnums[enum.Name] = enum
-					e2 := filteredEnums[enum.Alias]
-					e2.Values = enum.Values
-					filteredEnums[enum.Alias] = e2
+					filteredEnums[enum.Alias] = alias
 				}
+			}
+			// we need to assign values after merging as there may be multiple aliased to the same type
+			for _, enum := range filteredEnums {
+				if enum.Alias == "" {
+					continue
+				}
+				enum.Values = filteredEnums[enum.Alias].Values
+				filteredEnums[enum.Name] = enum
 			}
 		}
 		// remove object types for handles we don't keep
